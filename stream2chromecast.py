@@ -29,11 +29,11 @@ version: 0.6.3
 
 VERSION = "0.6.3"
 
-
 import sys
 import os
 import errno
 import signal
+import argparse
 
 from cc_media_controller import CCMediaController
 import cc_device_finder
@@ -54,7 +54,7 @@ import socket
 import tempfile
 
 
-script_name = (sys.argv[0].split(os.sep))[-1]
+parser = argparse.ArgumentParser()
 
 USAGETEXT = """
 Usage
@@ -149,7 +149,7 @@ Additional option to specify the buffer size of the data returned from the trans
     e.g. to specify a buffer size of 5 megabytes
     %s -transcode -transcodebufsize 5242880 <file>
 
-""" % ((script_name,) * 21)
+""" % ((parser.prog,) * 21)
 
 
 PIDFILE = os.path.join(tempfile.gettempdir(), "stream2chromecast_%s.pid")
@@ -400,7 +400,8 @@ def play(filename, transcode=False, transcoder=None, transcode_options=None, tra
         filename = os.path.abspath(filename)
         print "source is file: %s" % filename
     else:
-        if transcode and (filename.lower().startswith("http://") or filename.lower().startswith("https://") or filename.lower().startswith("rtsp://")):
+        if transcode and (filename.lower().startswith("http://") or
+                filename.lower().startswith("https://") or filename.lower().startswith("rtsp://")):
             print "source is URL: %s" % filename
         else:
             sys.exit("media file %s not found" % filename)
@@ -642,115 +643,75 @@ def print_ident():
     print "-----------------------------------------"
     print
 
-
-def validate_args(args):
-    """ validate that there are the correct number of arguments """
-    if len(args) < 1:
-        sys.exit(USAGETEXT)
-
-    if args[0] == "-setvol" and len(args) < 2:
-        sys.exit(USAGETEXT)
-
-
-def get_named_arg_value(arg_name, args, integer=False):
-    """ get a argument value by name """
-    arg_val = None
-    if arg_name in args:
-
-        arg_pos = args.index(arg_name)
-        arg_name = args.pop(arg_pos)
-
-        if len(args) > (arg_pos + 1):
-            arg_val = args.pop(arg_pos)
-
-    if integer:
-        int_arg_val = 0
-        if arg_val is not None:
-            try:
-                int_arg_val = int(arg_val)
-            except ValueError:
-                print "Invalid integer parameter, defaulting to zero. Parameter name:", arg_name
-
-        arg_val = int_arg_val
-
-    return arg_val
-
-
 def run():
     """ main execution """
     args = sys.argv[1:]
+    parser.add_argument('--devicename', help='device name')
+    parser.add_argument('--transcoder', help='transcoder to use (ffmpeg or avconv)')
+    parser.add_argument('--port', type=int, help='server port. random available port if not specified')
+    parser.add_argument('--transcode-opts', help='options to be passed to the transcoder, to be applied to the output')
+    parser.add_argument('--transcode-input-opts', help='options to be passed to the transcoder, to be applied to the input')
+    parser.add_argument('--transcode-bufsize', type=int, help='the transcoder will buffer approximately this many bytes of output')
+    parser.add_argument('--subtitles', help='subtitles file')
+    parser.add_argument('--subtitles-port', type=int, help='use the specified port for subtitles otherwise use randomly available port')
+    parser.add_argument('--subtitles-language', help='if not specified en-US will be used')
+    parser.add_argument('--transcode', action='store_true', help='transcode file before streaming')
+    parser.add_argument('cmd',
+            choices=['play', 'playurl', 'stop', 'pause', 'continue', 'status', 'devicelist', 'setvol', 'volup', 'voldown', 'mute'],
+            help='action to take')
+    parser.add_argument('args', nargs=argparse.REMAINDER, help='file or url to play')
+    args = parser.parse_args()
 
-    # optional device name parm. if not specified, device_name = None (the first device found will be used).
-    device_name = get_named_arg_value("-devicename", args)
+    device_name = args.devicename
+    transcoder = args.transcoder
+    server_port = args.port
+    transcode_options = args.transcode_opts
+    transcode_input_options = args.transcode_input_opts
+    transcode_bufsize = args.transcode_bufsize
+    subtitles = args.subtitles
+    subtitles_port = args.subtitles_port
+    subtitles_language = args.subtitles_language
 
-    # optional transcoder parm. if not specified, ffmpeg will be used, if installed, otherwise avconv.
-    transcoder = get_named_arg_value("-transcoder", args)
-
-    # optional server port parm. if not specified, a random available port will be used
-    server_port = get_named_arg_value("-port", args)
-
-    # optional transcode options parm. if specified, these options will be passed to the transcoder to be applied to the output
-    transcode_options = get_named_arg_value("-transcodeopts", args)
-
-    # optional transcode options parm. if specified, these options will be passed to the transcoder to be applied to the input data
-    transcode_input_options = get_named_arg_value("-transcodeinputopts", args)
-
-    # optional transcode bufsize parm. if specified, the transcoder will buffer approximately this many bytes of output
-    transcode_bufsize = get_named_arg_value("-transcodebufsize", args, integer=True)
-
-    # optional subtitle parm. if specified, the specified subtitles will be played.
-    subtitles = get_named_arg_value("-subtitles", args)
-
-    # optional subtitle_port parm. if not specified, a random available port will be used.
-    subtitles_port = get_named_arg_value("-subtitles_port", args)
-
-    # optional subtitle_language parm. if not specified en-US will be used.
-    subtitles_language = get_named_arg_value("-subtitles_language", args)
-
-    validate_args(args)
-
-    if args[0] == "-stop":
+    if args.cmd == 'stop':
         stop(device_name=device_name)
 
-    elif args[0] == "-pause":
+    elif args.cmd == 'pause':
         pause(device_name=device_name)
 
-    elif args[0] == "-continue":
+    elif args.cmd == 'continue':
         unpause(device_name=device_name)
 
-    elif args[0] == "-status":
+    elif args.cmd == 'status':
         get_status(device_name=device_name)
 
-    elif args[0] == "-setvol":
-        set_volume(float(args[1]), device_name=device_name)
+    elif args.cmd == 'setvol':
+        vol = float(args.args[0])
+        set_volume(vol, device_name=device_name)
 
-    elif args[0] == "-volup":
+    elif args.cmd == 'volup':
         volume_up(device_name=device_name)
 
-    elif args[0] == "-voldown":
+    elif args.cmd == 'voldown':
         volume_down(device_name=device_name)
 
-    elif args[0] == "-mute":
+    elif args.cmd == 'mute':
         set_volume(0, device_name=device_name)
 
-    elif args[0] == "-transcode":
-        arg2 = args[1]
-        play(arg2, transcode=True, transcoder=transcoder,
+    elif args.cmd == 'playurl':
+        url = args.args[0]
+        playurl(url, device_name=device_name)
+
+    elif args.cmd == 'devicelist':
+        list_devices()
+
+    elif args.cmd == 'play':
+        filename = args.args[0]
+        play(filename, transcode=args.transcode, transcoder=transcoder,
              transcode_options=transcode_options, transcode_input_options=transcode_input_options,
              transcode_bufsize=transcode_bufsize, device_name=device_name, server_port=server_port,
              subtitles=subtitles, subtitles_port=subtitles_port, subtitles_language=subtitles_language)
-
-    elif args[0] == "-playurl":
-        arg2 = args[1]
-        playurl(arg2, device_name=device_name)
-
-    elif args[0] == "-devicelist":
-        list_devices()
-
     else:
-        play(args[0], device_name=device_name, server_port=server_port, subtitles=subtitles,
-             subtitles_port=subtitles_port, subtitles_language=subtitles_language)
-
+        raise ValueError('bad command')
 
 if __name__ == "__main__":
     run()
